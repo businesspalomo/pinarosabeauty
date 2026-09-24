@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# NestJS build output
+backend/dist/
+
+# OS
+.DS_Store
+
+# Logs
+npm-debug.log*
+*.log

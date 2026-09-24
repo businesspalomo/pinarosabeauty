@@ -1,0 +1,2 @@
+import { Body, Controller, Get, Post, Query } from '@nestjs/common'; import { CoreService } from './core.service'; import { CurrentUserId } from './current-user';
+@Controller('customers') export class CustomersController{constructor(private s:CoreService){} @Get() list(@Query('q') q=''){return this.s.listCustomers(q)} @Post() create(@Body() b:any,@CurrentUserId() u:string){return this.s.createCustomer(b,u)}}

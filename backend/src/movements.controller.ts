@@ -1,0 +1,1 @@
+import { Controller, Get } from '@nestjs/common'; import { CoreService } from './core.service'; @Controller('movements') export class MovementsController{constructor(private s:CoreService){} @Get() get(){return this.s.movements()}}

@@ -1,0 +1,1 @@
+import { Controller, Get } from '@nestjs/common'; import { CoreService } from './core.service'; @Controller('users') export class UsersController{constructor(private s:CoreService){} @Get() get(){return this.s.users()}}

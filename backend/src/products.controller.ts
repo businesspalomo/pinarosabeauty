@@ -1,0 +1,2 @@
+import { Body, Controller, Get, Post, Query } from '@nestjs/common'; import { CoreService } from './core.service'; import { CurrentUserId } from './current-user';
+@Controller('products') export class ProductsController{constructor(private s:CoreService){} @Get() list(@Query('q') q=''){return this.s.listProducts(q)} @Get('shade-suggestions') shades(@Query('brand') b='',@Query('product') p=''){return this.s.shadeSuggestions(b,p)} @Post() create(@Body() b:any,@CurrentUserId() u:string){return this.s.createProduct(b,u)}}
