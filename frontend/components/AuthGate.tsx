@@ -15,14 +15,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setReady(true);
-      if (!data.session && pathname !== '/login') router.replace('/login');
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      if (!newSession && pathname !== '/login') router.replace('/login');
+      setReady(true);
     });
     return () => sub.subscription.unsubscribe();
-  }, [pathname, router]);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!session && pathname !== '/login') router.replace('/login');
+    if (session && pathname === '/login') router.replace('/');
+  }, [ready, session, pathname, router]);
 
   if (pathname === '/login') return <>{children}</>;
   if (!ready || !session) return null;
