@@ -56,7 +56,8 @@ export class CoreService {
       pv.cost_ars::float cost_ars,pv.wholesale_price::float wholesale_price,pv.low_stock_threshold,
       bc.barcode, c.name category, sc.name subcategory,
       coalesce(sum(ib.physical_quantity),0)::int physical,coalesce(sum(ib.reserved_quantity),0)::int reserved,coalesce(sum(ib.physical_quantity-ib.reserved_quantity),0)::int available,
-      (select pi.url from product_images pi where pi.variant_id=pv.id order by pi.is_primary desc,pi.created_at asc limit 1) image_url
+      (select pi.url from product_images pi where pi.variant_id=pv.id order by pi.is_primary desc,pi.created_at asc limit 1) image_url,
+      (select l.code from inventory_balance ib2 join locations l on l.id=ib2.location_id where ib2.variant_id=pv.id order by ib2.physical_quantity desc limit 1) location_code
       from product_variants pv join products p on p.id=pv.product_id join brands b on b.id=p.brand_id
       left join categories c on c.id=p.category_id left join subcategories sc on sc.id=p.subcategory_id
       left join barcodes bc on bc.variant_id=pv.id and bc.is_primary=true left join inventory_balance ib on ib.variant_id=pv.id
@@ -154,6 +155,23 @@ export class CoreService {
       if (compact(input.imageUrl)) {
         const hasImage = await c.query(`select 1 from product_images where variant_id=$1 and url=$2`, [variantId, compact(input.imageUrl)]);
         if (!hasImage.rowCount) await c.query(`insert into product_images(variant_id,url,is_primary) values($1,$2,true)`, [variantId, compact(input.imageUrl)]);
+      }
+
+      if (compact(input.locationCode) && input.physicalQuantity !== undefined && input.physicalQuantity !== null && input.physicalQuantity !== '') {
+        const locationCode = compact(input.locationCode);
+        const loc = await c.query(`select id from locations where code=$1`, [locationCode]);
+        if (!loc.rowCount) throw new BadRequestException(`Ubicación ${locationCode} no existe`);
+        const locationId = loc.rows[0].id;
+        const bal = await c.query(`select * from inventory_balance where variant_id=$1 and location_id=$2 for update`, [variantId, locationId]);
+        const before = bal.rowCount ? Number(bal.rows[0].physical_quantity) : 0;
+        const reserved = bal.rowCount ? Number(bal.rows[0].reserved_quantity) : 0;
+        const after = Number(input.physicalQuantity);
+        if (after < 0) throw new BadRequestException('La cantidad no puede ser negativa');
+        if (after < reserved) throw new BadRequestException(`No puede ser menor a lo reservado (${reserved})`);
+        if (after !== before) {
+          await c.query(`insert into inventory_balance(variant_id,location_id,physical_quantity,reserved_quantity) values($1,$2,$3,0) on conflict(variant_id,location_id) do update set physical_quantity=$3,updated_at=now()`, [variantId, locationId, after]);
+          await c.query(`insert into stock_movements(variant_id,location_id,movement_type,quantity,stock_before,stock_after,reserved_before,reserved_after,reference_type,user_id,reason) values($1,$2,'ADJUSTMENT',$3,$4,$5,$6,$6,'MANUAL_EDIT',$7,'Ajuste manual desde edición de producto')`, [variantId, locationId, after - before, before, after, reserved, userId]);
+        }
       }
 
       await c.query(`insert into audit_log(user_id,action,entity_type,entity_id,new_value) values($1,'UPDATE','PRODUCT_VARIANT',$2,$3::jsonb)`, [userId,variantId,JSON.stringify({ sku, barcode: input.barcode })]);
