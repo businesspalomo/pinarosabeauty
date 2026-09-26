@@ -78,6 +78,9 @@ export class CoreService {
       const brand = await c.query(`insert into brands(name) values($1) on conflict(name) do update set name=excluded.name returning id`, [compact(input.brand)]);
       const cat = await c.query(`insert into categories(brand_id,name,example) values($1,$2,$3) on conflict(brand_id,name) do update set example=coalesce(excluded.example,categories.example) returning id`, [brand.rows[0].id, compact(input.category), compact(input.categoryExample) || null]);
       const sub = await c.query(`insert into subcategories(category_id,name,example) values($1,$2,$3) on conflict(category_id,name) do update set example=coalesce(excluded.example,subcategories.example) returning id`, [cat.rows[0].id, compact(input.subcategory), compact(input.subcategoryExample) || null]);
+      if (compact(input.line)) {
+        await c.query(`insert into product_lines(category_id,subcategory_id,name) values($1,$2,$3) on conflict(category_id,subcategory_id,name) do nothing`, [cat.rows[0].id, sub.rows[0].id, compact(input.line)]);
+      }
       const prod = await c.query(`insert into products(brand_id,category_id,subcategory_id,line,name,description) values($1,$2,$3,$4,$5,$6)
         on conflict(brand_id,name,line) do update set category_id=excluded.category_id,subcategory_id=excluded.subcategory_id,description=coalesce(excluded.description,products.description),updated_at=now() returning id`,
         [brand.rows[0].id,cat.rows[0].id,sub.rows[0].id,compact(input.line)||null,compact(input.product),compact(input.description)||null]);
