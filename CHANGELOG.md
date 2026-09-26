@@ -2,6 +2,10 @@
 
 Todas las versiones importantes del proyecto se documentan acá.
 
+## v1.2.0 — 2026-09-27
+- Botón "Eliminar producto" en la edición — lo saca del catálogo (borrado lógico) sin perder su historial de movimientos. Bloquea el borrado si tiene stock reservado en un pedido.
+- Botón "Agregar variante" en cada fila — abre "Nuevo SKU" precargado con la marca, categoría, subcategoría, línea, nombre, presentación, costo y precio del producto elegido, dejando solo el tono, código de barras y SKU para completar.
+
 ## v1.1.0 — 2026-09-27
 - Se puede editar la cantidad física de stock de un producto directamente desde "Editar producto" — queda registrado como un movimiento de ajuste, sin perder el historial.
 

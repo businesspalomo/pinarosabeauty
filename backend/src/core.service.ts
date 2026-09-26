@@ -179,6 +179,18 @@ export class CoreService {
     });
   }
 
+  async deleteProduct(variantId: string, userId: string) {
+    return this.db.transaction(async c => {
+      const existing = await c.query(`select id from product_variants where id=$1 and active=true`, [variantId]);
+      if (!existing.rowCount) throw new NotFoundException('Variante no encontrada');
+      const reserved = await c.query(`select coalesce(sum(reserved_quantity),0)::int total from inventory_balance where variant_id=$1`, [variantId]);
+      if (Number(reserved.rows[0].total) > 0) throw new ConflictException('No se puede eliminar: tiene stock reservado en un pedido');
+      await c.query(`update product_variants set active=false, updated_at=now() where id=$1`, [variantId]);
+      await c.query(`insert into audit_log(user_id,action,entity_type,entity_id,new_value) values($1,'DELETE','PRODUCT_VARIANT',$2,$3::jsonb)`, [userId, variantId, JSON.stringify({ deactivated: true })]);
+      return { ok: true };
+    });
+  }
+
   async listCustomers(search='') {
     const q=`%${search.trim()}%`;
     const r=await this.db.query(`select * from customers where ($1='' or name ilike $2 or coalesce(business_name,'') ilike $2 or coalesce(phone,'') ilike $2 or coalesce(instagram,'') ilike $2) order by name limit 200`,[search.trim(),q]);
