@@ -106,6 +106,61 @@ export class CoreService {
     });
   }
 
+  async updateProduct(variantId: string, input: any, userId: string) {
+    const required = ['brand','product','barcode','category','subcategory'];
+    for (const key of required) if (!compact(input[key])) throw new BadRequestException(`Falta ${key}`);
+    return this.db.transaction(async c => {
+      const existing = await c.query(`select product_id from product_variants where id=$1`, [variantId]);
+      if (!existing.rowCount) throw new NotFoundException('Variante no encontrada');
+      const productId = existing.rows[0].product_id;
+
+      const brand = await c.query(`insert into brands(name) values($1) on conflict(name) do update set name=excluded.name returning id`, [compact(input.brand)]);
+      const cat = await c.query(`insert into categories(brand_id,name,example) values($1,$2,$3) on conflict(brand_id,name) do update set example=coalesce(excluded.example,categories.example) returning id`, [brand.rows[0].id, compact(input.category), compact(input.categoryExample) || null]);
+      const sub = await c.query(`insert into subcategories(category_id,name,example) values($1,$2,$3) on conflict(category_id,name) do update set example=coalesce(excluded.example,subcategories.example) returning id`, [cat.rows[0].id, compact(input.subcategory), compact(input.subcategoryExample) || null]);
+      if (compact(input.line)) {
+        await c.query(`insert into product_lines(category_id,subcategory_id,name) values($1,$2,$3) on conflict(category_id,subcategory_id,name) do nothing`, [cat.rows[0].id, sub.rows[0].id, compact(input.line)]);
+      }
+
+      try {
+        await c.query(`update products set brand_id=$1,category_id=$2,subcategory_id=$3,line=$4,name=$5,description=coalesce($6,description),updated_at=now() where id=$7`,
+          [brand.rows[0].id,cat.rows[0].id,sub.rows[0].id,compact(input.line)||null,compact(input.product),compact(input.description)||null,productId]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException('Ya existe un producto con esa marca, nombre y línea');
+        throw e;
+      }
+
+      let sku = compact(input.sku);
+      if (!sku) {
+        const base = `${skuPart(input.brand,3)}-${skuPart(input.line || input.product,4)}-${skuPart(input.shade || input.presentation || 'STD',5)}`;
+        sku = `${base}-${String(input.barcode).slice(-4)}`;
+      }
+
+      try {
+        await c.query(`update product_variants set shade_name=$1,shade_code=$2,presentation=$3,size_value=$4,size_unit=$5,internal_sku=$6,cost_ars=$7,wholesale_price=$8,low_stock_threshold=$9,updated_at=now() where id=$10`,
+          [compact(input.shade)||null,compact(input.shadeCode)||null,compact(input.presentation)||null,input.sizeValue||null,compact(input.sizeUnit)||null,sku,input.costArs||null,input.wholesalePrice||0,input.lowStockThreshold??5,variantId]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException('Ya existe otra variante con ese SKU');
+        throw e;
+      }
+
+      try {
+        const bc = await c.query(`update barcodes set barcode=$1 where variant_id=$2 and is_primary=true returning id`, [compact(input.barcode), variantId]);
+        if (!bc.rowCount) await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variantId, compact(input.barcode)]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException('Ese código de barras ya está en uso por otro producto');
+        throw e;
+      }
+
+      if (compact(input.imageUrl)) {
+        const hasImage = await c.query(`select 1 from product_images where variant_id=$1 and url=$2`, [variantId, compact(input.imageUrl)]);
+        if (!hasImage.rowCount) await c.query(`insert into product_images(variant_id,url,is_primary) values($1,$2,true)`, [variantId, compact(input.imageUrl)]);
+      }
+
+      await c.query(`insert into audit_log(user_id,action,entity_type,entity_id,new_value) values($1,'UPDATE','PRODUCT_VARIANT',$2,$3::jsonb)`, [userId,variantId,JSON.stringify({ sku, barcode: input.barcode })]);
+      return { id: variantId, sku };
+    });
+  }
+
   async listCustomers(search='') {
     const q=`%${search.trim()}%`;
     const r=await this.db.query(`select * from customers where ($1='' or name ilike $2 or coalesce(business_name,'') ilike $2 or coalesce(phone,'') ilike $2 or coalesce(instagram,'') ilike $2) order by name limit 200`,[search.trim(),q]);
