@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from './database.service';
 
@@ -186,15 +186,37 @@ export class CoreService {
     });
   }
 
-  async deleteProduct(variantId: string, userId: string) {
+  async productUsage(variantId: string) {
+    const orders = await this.db.query(`select o.order_number, o.status from order_items oi join orders o on o.id=oi.order_id where oi.variant_id=$1 order by o.created_at desc`, [variantId]);
+    const movements = await this.db.query(`select count(*)::int total from stock_movements where variant_id=$1`, [variantId]);
+    return { orders: orders.rows, movements: Number(movements.rows[0].total) };
+  }
+
+  // Borrado definitivo, pensado para corregir una carga incorrecta. Saca el producto de los pedidos donde
+  // estaba (recalculando sus totales) y borra su historial de movimientos, recepciones y picking.
+  async deleteProduct(variantId: string, userId: string, role: string) {
+    if (role !== 'ADMIN') throw new ForbiddenException('Solo un administrador puede eliminar productos');
     return this.db.transaction(async c => {
-      const existing = await c.query(`select id from product_variants where id=$1 and active=true`, [variantId]);
+      const existing = await c.query(`select pv.id, pv.product_id, pv.internal_sku, pv.shade_name, p.name product, b.name brand
+        from product_variants pv join products p on p.id=pv.product_id join brands b on b.id=p.brand_id where pv.id=$1 for update of pv`, [variantId]);
       if (!existing.rowCount) throw new NotFoundException('Variante no encontrada');
-      const reserved = await c.query(`select coalesce(sum(reserved_quantity),0)::int total from inventory_balance where variant_id=$1`, [variantId]);
-      if (Number(reserved.rows[0].total) > 0) throw new ConflictException('No se puede eliminar: tiene stock reservado en un pedido');
-      await c.query(`update product_variants set active=false, updated_at=now() where id=$1`, [variantId]);
-      await c.query(`insert into audit_log(user_id,action,entity_type,entity_id,new_value) values($1,'DELETE','PRODUCT_VARIANT',$2,$3::jsonb)`, [userId, variantId, JSON.stringify({ deactivated: true })]);
-      return { ok: true };
+      const v = existing.rows[0];
+      const orders = await c.query(`select distinct order_id from order_items where variant_id=$1`, [variantId]);
+      await c.query(`delete from picking_scans where variant_id=$1`, [variantId]);
+      await c.query(`delete from reservations where variant_id=$1`, [variantId]);
+      await c.query(`delete from order_items where variant_id=$1`, [variantId]);
+      await c.query(`delete from receiving_items where variant_id=$1`, [variantId]);
+      await c.query(`delete from stock_movements where variant_id=$1`, [variantId]);
+      await c.query(`delete from product_variants where id=$1`, [variantId]);
+      const siblings = await c.query(`select 1 from product_variants where product_id=$1 limit 1`, [v.product_id]);
+      if (!siblings.rowCount) await c.query(`delete from products where id=$1`, [v.product_id]);
+      for (const o of orders.rows) {
+        await c.query(`update orders set subtotal=t.s, total=greatest(t.s-orders.discount,0), updated_at=now()
+          from (select coalesce(sum(subtotal),0) s from order_items where order_id=$1) t where orders.id=$1`, [o.order_id]);
+      }
+      await c.query(`insert into audit_log(user_id,action,entity_type,entity_id,old_value) values($1,'DELETE','PRODUCT_VARIANT',$2,$3::jsonb)`,
+        [userId, variantId, JSON.stringify({ brand: v.brand, product: v.product, shade: v.shade_name, sku: v.internal_sku, ordersAffected: orders.rowCount })]);
+      return { ok: true, ordersAffected: orders.rowCount };
     });
   }
 

@@ -2,6 +2,11 @@
 
 Todas las versiones importantes del proyecto se documentan acá.
 
+## v1.5.0 — 2026-09-28
+- "Eliminar producto" ahora lo borra definitivamente de la base de datos. Es para corregir un producto cargado por error y solo lo puede hacer un administrador.
+- Antes de borrar se muestra una advertencia con los pedidos donde está el producto y cuántos movimientos de stock tiene. Al confirmar, se quita de esos pedidos (recalculando sus totales) y se borra su historial de movimientos, recepciones y picking. Si era el último tono del producto, también se borra el producto.
+- Queda registrado en la auditoría qué se borró, quién lo borró y cuántos pedidos afectó.
+
 ## v1.4.1 — 2026-09-28
 - Al editar un producto, la "Cantidad física" es el stock total y se guarda exactamente el número escrito, sin sumarlo ni restarlo a lo que había. Antes, si el producto tenía stock en más de una ubicación o se cambiaba la ubicación, el resultado terminaba siendo una suma. El stock libre queda en la ubicación elegida y no se puede bajar de lo reservado en pedidos. El cambio sigue quedando en Movimientos como ajuste manual.
 

@@ -40,6 +40,9 @@ Prefijo base: `/api`
 | GET | `/products?q=<texto>` | Buscar/listar variantes de producto con stock | Sí |
 | GET | `/products/shade-suggestions?brand=&product=` | Tonos ya cargados para una marca+producto | Sí |
 | POST | `/products` | Crear producto/variante nueva (marca, categoría, subcategoría, línea, tono, SKU, stock inicial) | Sí |
+| PATCH | `/products/:id` | Editar una variante. `physicalQuantity` es el stock total y se guarda exacto | Sí |
+| GET | `/products/:id/usage` | Pedidos donde está la variante y cantidad de movimientos (para advertir antes de borrar) | Sí |
+| DELETE | `/products/:id` | Borrado definitivo (solo ADMIN): la quita de pedidos, recalcula sus totales y borra su historial | Sí |
 | GET | `/customers?q=<texto>` | Buscar/listar clientes | Sí |
 | POST | `/customers` | Crear cliente | Sí |
 | POST | `/receiving` | Iniciar sesión de recepción de mercadería | Sí |
