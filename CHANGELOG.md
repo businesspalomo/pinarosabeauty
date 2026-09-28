@@ -4,7 +4,8 @@ Todas las versiones importantes del proyecto se documentan acá.
 
 ## v1.5.1 — 2026-09-28
 - Los errores de la base de datos ya no aparecen como "Internal server error": se muestra un mensaje que dice qué falló (por ejemplo, qué dato está repetido) y el detalle queda en los logs del servidor.
-- Al crear un producto con un código de barras o SKU que ya existe, aparece un aviso claro en lugar de un error 500.
+- Corregido el error 500 al guardar un producto (por ejemplo con una línea nueva) cuando el SKU automático coincidía con el de otro producto. Como el SKU automático usa solo las primeras letras de la línea y del tono y los últimos 4 números del código, dos productos parecidos podían coincidir (por ejemplo "Butter Gloss" y "Butter Gloss Bling"). Ahora, si ya existe, se le agrega -2, -3, etc.
+- Si el SKU o el código de barras se escriben a mano y ya existen, aparece un aviso claro en lugar del error 500.
 
 ## v1.5.0 — 2026-09-28
 - "Eliminar producto" ahora lo borra definitivamente de la base de datos. Es para corregir un producto cargado por error y solo lo puede hacer un administrador.
