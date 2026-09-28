@@ -20,6 +20,20 @@ async function uniqueSku(c: PoolClient, input: any, excludeVariantId?: string) {
   }
 }
 
+// Avisa qué producto ya tiene el código de barras. Los productos eliminados con la versión anterior
+// quedaron ocultos (active=false) pero siguen ocupando su código.
+async function assertBarcodeFree(c: PoolClient, barcode: string, excludeVariantId?: string) {
+  const owner = await c.query(`select b.name brand, p.name product, pv.shade_name shade, (pv.active and p.active) active
+    from barcodes bc join product_variants pv on pv.id=bc.variant_id join products p on p.id=pv.product_id join brands b on b.id=p.brand_id
+    where bc.barcode=$1 and bc.variant_id is distinct from $2 limit 1`, [barcode, excludeVariantId || null]);
+  if (!owner.rowCount) return;
+  const o = owner.rows[0];
+  const name = `${o.brand} ${o.product}${o.shade ? ` (${o.shade})` : ''}`;
+  throw new ConflictException(o.active
+    ? `El código de barras ${barcode} ya lo tiene ${name}.`
+    : `El código de barras ${barcode} lo tiene ${name}, un producto eliminado con la versión anterior que quedó oculto. Hay que borrarlo definitivamente para poder reusar el código.`);
+}
+
 @Injectable()
 export class CoreService {
   constructor(private readonly db: DatabaseService) {}
@@ -107,6 +121,7 @@ export class CoreService {
         throw e;
       }
       try {
+        await assertBarcodeFree(c, compact(input.barcode));
         await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.barcode)]);
       } catch (e: any) {
         if (e.code === '23505') throw new ConflictException('Ese código de barras ya está en uso por otro producto');
@@ -159,6 +174,7 @@ export class CoreService {
       }
 
       try {
+        await assertBarcodeFree(c, compact(input.barcode), variantId);
         const bc = await c.query(`update barcodes set barcode=$1 where variant_id=$2 and is_primary=true returning id`, [compact(input.barcode), variantId]);
         if (!bc.rowCount) await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variantId, compact(input.barcode)]);
       } catch (e: any) {

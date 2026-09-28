@@ -6,6 +6,8 @@ Todas las versiones importantes del proyecto se documentan acá.
 - Los errores de la base de datos ya no aparecen como "Internal server error": se muestra un mensaje que dice qué falló (por ejemplo, qué dato está repetido) y el detalle queda en los logs del servidor.
 - Corregido el error 500 al guardar un producto (por ejemplo con una línea nueva) cuando el SKU automático coincidía con el de otro producto. Como el SKU automático usa solo las primeras letras de la línea y del tono y los últimos 4 números del código, dos productos parecidos podían coincidir (por ejemplo "Butter Gloss" y "Butter Gloss Bling"). Ahora, si ya existe, se le agrega -2, -3, etc.
 - Si el SKU o el código de barras se escriben a mano y ya existen, aparece un aviso claro en lugar del error 500.
+- Si el código de barras ya lo tiene otro producto, el aviso dice cuál. Si es un producto eliminado con la versión anterior (que solo lo ocultaba), también lo aclara.
+- Nuevo script `database/purge_hidden_products.sql` para borrar definitivamente los productos que quedaron ocultos con la versión anterior y liberar sus códigos de barras y SKU.
 
 ## v1.5.0 — 2026-09-28
 - "Eliminar producto" ahora lo borra definitivamente de la base de datos. Es para corregir un producto cargado por error y solo lo puede hacer un administrador.
