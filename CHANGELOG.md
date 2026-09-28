@@ -2,6 +2,10 @@
 
 Todas las versiones importantes del proyecto se documentan acá.
 
+## v1.5.1 — 2026-09-28
+- Los errores de la base de datos ya no aparecen como "Internal server error": se muestra un mensaje que dice qué falló (por ejemplo, qué dato está repetido) y el detalle queda en los logs del servidor.
+- Al crear un producto con un código de barras o SKU que ya existe, aparece un aviso claro en lugar de un error 500.
+
 ## v1.5.0 — 2026-09-28
 - "Eliminar producto" ahora lo borra definitivamente de la base de datos. Es para corregir un producto cargado por error y solo lo puede hacer un administrador.
 - Antes de borrar se muestra una advertencia con los pedidos donde está el producto y cuántos movimientos de stock tiene. Al confirmar, se quita de esos pedidos (recalculando sus totales) y se borra su historial de movimientos, recepciones y picking. Si era el último tono del producto, también se borra el producto.

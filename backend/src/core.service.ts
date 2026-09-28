@@ -90,10 +90,21 @@ export class CoreService {
         const base = `${skuPart(input.brand,3)}-${skuPart(input.line || input.product,4)}-${skuPart(input.shade || input.presentation || 'STD',5)}`;
         sku = `${base}-${String(input.barcode).slice(-4)}`;
       }
-      const variant = await c.query(`insert into product_variants(product_id,shade_name,shade_code,presentation,size_value,size_unit,internal_sku,cost_ars,wholesale_price,low_stock_threshold)
+      let variant: any;
+      try {
+        variant = await c.query(`insert into product_variants(product_id,shade_name,shade_code,presentation,size_value,size_unit,internal_sku,cost_ars,wholesale_price,low_stock_threshold)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
         [prod.rows[0].id,compact(input.shade)||null,compact(input.shadeCode)||null,compact(input.presentation)||null,input.sizeValue||null,compact(input.sizeUnit)||null,sku,input.costArs||null,input.wholesalePrice||0,input.lowStockThreshold??5]);
-      await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.barcode)]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException(`Ya existe otra variante con el SKU ${sku}. Escribí un SKU distinto o dejalo vacío.`);
+        throw e;
+      }
+      try {
+        await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.barcode)]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException('Ese código de barras ya está en uso por otro producto');
+        throw e;
+      }
       if (compact(input.imageUrl)) await c.query(`insert into product_images(variant_id,url,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.imageUrl)]);
       if ((Number(input.initialQuantity)||0) > 0) {
         const locationCode = compact(input.locationCode) || 'RECEPCION';
