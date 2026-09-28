@@ -158,19 +158,26 @@ export class CoreService {
       }
 
       if (compact(input.locationCode) && input.physicalQuantity !== undefined && input.physicalQuantity !== null && input.physicalQuantity !== '') {
+        // La cantidad escrita es el stock total del producto y se guarda tal cual: no se suma a lo que ya había.
+        // Todo el stock libre queda en la ubicación elegida; en las demás solo queda lo reservado para pedidos.
         const locationCode = compact(input.locationCode);
         const loc = await c.query(`select id from locations where code=$1`, [locationCode]);
         if (!loc.rowCount) throw new BadRequestException(`Ubicación ${locationCode} no existe`);
         const locationId = loc.rows[0].id;
-        const bal = await c.query(`select * from inventory_balance where variant_id=$1 and location_id=$2 for update`, [variantId, locationId]);
-        const before = bal.rowCount ? Number(bal.rows[0].physical_quantity) : 0;
-        const reserved = bal.rowCount ? Number(bal.rows[0].reserved_quantity) : 0;
-        const after = Number(input.physicalQuantity);
-        if (after < 0) throw new BadRequestException('La cantidad no puede ser negativa');
-        if (after < reserved) throw new BadRequestException(`No puede ser menor a lo reservado (${reserved})`);
-        if (after !== before) {
-          await c.query(`insert into inventory_balance(variant_id,location_id,physical_quantity,reserved_quantity) values($1,$2,$3,0) on conflict(variant_id,location_id) do update set physical_quantity=$3,updated_at=now()`, [variantId, locationId, after]);
-          await c.query(`insert into stock_movements(variant_id,location_id,movement_type,quantity,stock_before,stock_after,reserved_before,reserved_after,reference_type,user_id,reason) values($1,$2,'ADJUSTMENT',$3,$4,$5,$6,$6,'MANUAL_EDIT',$7,'Ajuste manual desde edición de producto')`, [variantId, locationId, after - before, before, after, reserved, userId]);
+        const target = Number(input.physicalQuantity);
+        if (!Number.isInteger(target) || target < 0) throw new BadRequestException('La cantidad tiene que ser un número entero, 0 o mayor');
+        await c.query(`insert into inventory_balance(variant_id,location_id,physical_quantity,reserved_quantity) values($1,$2,0,0) on conflict(variant_id,location_id) do nothing`, [variantId, locationId]);
+        const bals = await c.query(`select * from inventory_balance where variant_id=$1 for update`, [variantId]);
+        const reservedTotal = bals.rows.reduce((s: number, b: any) => s + Number(b.reserved_quantity), 0);
+        if (target < reservedTotal) throw new BadRequestException(`No puede ser menor a lo reservado en pedidos (${reservedTotal})`);
+        const reservedElsewhere = bals.rows.filter((b: any) => b.location_id !== locationId).reduce((s: number, b: any) => s + Number(b.reserved_quantity), 0);
+        for (const b of bals.rows) {
+          const before = Number(b.physical_quantity);
+          const reserved = Number(b.reserved_quantity);
+          const after = b.location_id === locationId ? target - reservedElsewhere : reserved;
+          if (after === before) continue;
+          await c.query(`update inventory_balance set physical_quantity=$2,updated_at=now() where id=$1`, [b.id, after]);
+          await c.query(`insert into stock_movements(variant_id,location_id,movement_type,quantity,stock_before,stock_after,reserved_before,reserved_after,reference_type,user_id,reason) values($1,$2,'ADJUSTMENT',$3,$4,$5,$6,$6,'MANUAL_EDIT',$7,'Ajuste manual desde edición de producto')`, [variantId, b.location_id, after - before, before, after, reserved, userId]);
         }
       }
 
