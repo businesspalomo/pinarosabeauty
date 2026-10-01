@@ -9,6 +9,31 @@ function skuPart(value: string, len = 4) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '').toUpperCase().slice(0, len) || 'GEN';
 }
 
+// SKU automático: marca-línea-tono-últimos 4 del código. Como usa solo las primeras letras,
+// dos productos distintos pueden coincidir; en ese caso se agrega -2, -3, etc.
+async function uniqueSku(c: PoolClient, input: any, excludeVariantId?: string) {
+  const base = `${skuPart(input.brand,3)}-${skuPart(input.line || input.product,4)}-${skuPart(input.shade || input.presentation || 'STD',5)}-${String(input.barcode).slice(-4)}`;
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? base : `${base}-${n}`;
+    const taken = await c.query(`select 1 from product_variants where internal_sku=$1 and id is distinct from $2`, [candidate, excludeVariantId || null]);
+    if (!taken.rowCount) return candidate;
+  }
+}
+
+// Avisa qué producto ya tiene el código de barras. Los productos eliminados con la versión anterior
+// quedaron ocultos (active=false) pero siguen ocupando su código.
+async function assertBarcodeFree(c: PoolClient, barcode: string, excludeVariantId?: string) {
+  const owner = await c.query(`select b.name brand, p.name product, pv.shade_name shade, (pv.active and p.active) active
+    from barcodes bc join product_variants pv on pv.id=bc.variant_id join products p on p.id=pv.product_id join brands b on b.id=p.brand_id
+    where bc.barcode=$1 and bc.variant_id is distinct from $2 limit 1`, [barcode, excludeVariantId || null]);
+  if (!owner.rowCount) return;
+  const o = owner.rows[0];
+  const name = `${o.brand} ${o.product}${o.shade ? ` (${o.shade})` : ''}`;
+  throw new ConflictException(o.active
+    ? `El código de barras ${barcode} ya lo tiene ${name}.`
+    : `El código de barras ${barcode} lo tiene ${name}, un producto eliminado con la versión anterior que quedó oculto. Hay que borrarlo definitivamente para poder reusar el código.`);
+}
+
 @Injectable()
 export class CoreService {
   constructor(private readonly db: DatabaseService) {}
@@ -85,15 +110,23 @@ export class CoreService {
       const prod = await c.query(`insert into products(brand_id,category_id,subcategory_id,line,name,description) values($1,$2,$3,$4,$5,$6)
         on conflict(brand_id,name,line) do update set category_id=excluded.category_id,subcategory_id=excluded.subcategory_id,description=coalesce(excluded.description,products.description),updated_at=now() returning id`,
         [brand.rows[0].id,cat.rows[0].id,sub.rows[0].id,compact(input.line)||null,compact(input.product),compact(input.description)||null]);
-      let sku = compact(input.sku);
-      if (!sku) {
-        const base = `${skuPart(input.brand,3)}-${skuPart(input.line || input.product,4)}-${skuPart(input.shade || input.presentation || 'STD',5)}`;
-        sku = `${base}-${String(input.barcode).slice(-4)}`;
-      }
-      const variant = await c.query(`insert into product_variants(product_id,shade_name,shade_code,presentation,size_value,size_unit,internal_sku,cost_ars,wholesale_price,low_stock_threshold)
+      const sku = compact(input.sku) || await uniqueSku(c, input);
+      let variant: any;
+      try {
+        variant = await c.query(`insert into product_variants(product_id,shade_name,shade_code,presentation,size_value,size_unit,internal_sku,cost_ars,wholesale_price,low_stock_threshold)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
         [prod.rows[0].id,compact(input.shade)||null,compact(input.shadeCode)||null,compact(input.presentation)||null,input.sizeValue||null,compact(input.sizeUnit)||null,sku,input.costArs||null,input.wholesalePrice||0,input.lowStockThreshold??5]);
-      await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.barcode)]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException(`Ya existe otra variante con el SKU ${sku}. Escribí un SKU distinto o dejalo vacío.`);
+        throw e;
+      }
+      try {
+        await assertBarcodeFree(c, compact(input.barcode));
+        await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.barcode)]);
+      } catch (e: any) {
+        if (e.code === '23505') throw new ConflictException('Ese código de barras ya está en uso por otro producto');
+        throw e;
+      }
       if (compact(input.imageUrl)) await c.query(`insert into product_images(variant_id,url,is_primary) values($1,$2,true)`, [variant.rows[0].id, compact(input.imageUrl)]);
       if ((Number(input.initialQuantity)||0) > 0) {
         const locationCode = compact(input.locationCode) || 'RECEPCION';
@@ -130,11 +163,7 @@ export class CoreService {
         throw e;
       }
 
-      let sku = compact(input.sku);
-      if (!sku) {
-        const base = `${skuPart(input.brand,3)}-${skuPart(input.line || input.product,4)}-${skuPart(input.shade || input.presentation || 'STD',5)}`;
-        sku = `${base}-${String(input.barcode).slice(-4)}`;
-      }
+      const sku = compact(input.sku) || await uniqueSku(c, input, variantId);
 
       try {
         await c.query(`update product_variants set shade_name=$1,shade_code=$2,presentation=$3,size_value=$4,size_unit=$5,internal_sku=$6,cost_ars=$7,wholesale_price=$8,low_stock_threshold=$9,updated_at=now() where id=$10`,
@@ -145,6 +174,7 @@ export class CoreService {
       }
 
       try {
+        await assertBarcodeFree(c, compact(input.barcode), variantId);
         const bc = await c.query(`update barcodes set barcode=$1 where variant_id=$2 and is_primary=true returning id`, [compact(input.barcode), variantId]);
         if (!bc.rowCount) await c.query(`insert into barcodes(variant_id,barcode,is_primary) values($1,$2,true)`, [variantId, compact(input.barcode)]);
       } catch (e: any) {
